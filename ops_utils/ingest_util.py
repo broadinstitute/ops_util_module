@@ -330,10 +330,15 @@ class DataIngest:
 
         **Args:**
         - dataset_id (str): The ID of the dataset.
-        - sources (list[dict]): Ingest sources. Each entry looks like
-            `{"uri": "s3://my-bucket/data/samples.parquet", "targetTable": "samples", "format": "PARQUET"}`.
-            `format` defaults to `PARQUET` if omitted, and can also be `CSV` or `JSON`. An optional `schema` key
-            (`{"id": "<schema-version-id>", "validateForeignKeys": true}`) can be included to validate against a
+        - sources (list[dict]): Ingest sources. Each entry must provide exactly one of `uri` or
+            `records`:
+            - URI source: `{"uri": "s3://my-bucket/data/samples.parquet", "targetTable": "samples",
+              "format": "PARQUET"}`. `format` defaults to `PARQUET` if omitted, and can also be `CSV`
+              or `JSON`.
+            - Inline records source: `{"records": [{"id": 1, "name": "foo"}, ...], "targetTable":
+              "samples"}`. Records are always treated as JSON and are limited to 10 MB per source.
+            Either type can include an optional `schema` key
+            (`{"id": "<schema-version-id>", "validateForeignKeys": true}`) to validate against a
             schema version.
         - timeout (str, optional): Maximum runtime for this ingest, e.g. `"8h"`, `"90m"`.
 
@@ -348,6 +353,37 @@ class DataIngest:
             content_type=APPLICATION_JSON,
             data=json.dumps(payload)
         )
+
+    def ingest_records(
+            self,
+            dataset_id: str,
+            target_table: str,
+            records: list[dict],
+            schema: Optional[dict] = None,
+            timeout: Optional[str] = None,
+    ) -> requests.Response:
+        """
+        Ingest a set of inline JSON records into a dataset table, without staging a file first.
+
+        This is a convenience wrapper around `ingest_tabular_data` for a single inline-records
+        source. It is an asynchronous operation - use `wait_for_job` with the returned `jobId` to
+        wait for completion. Records are limited to 10 MB per source; prefer a URI source (see
+        `ingest_tabular_data`) for large or sensitive loads.
+
+        **Args:**
+        - dataset_id (str): The ID of the dataset.
+        - target_table (str): Target table name within the dataset.
+        - records (list[dict]): Rows to ingest. Each record is a JSON object whose fields map to
+            table columns.
+        - schema (dict, optional): Schema validation options, e.g.
+            `{"id": "<schema-version-id>", "validateForeignKeys": true}`.
+        - timeout (str, optional): Maximum runtime for this ingest, e.g. `"8h"`, `"90m"`.
+
+        **Returns:**
+        - requests.Response: The response from the request, containing a `jobId`.
+        """
+        source = self._build_payload(records=records, targetTable=target_table, schema=schema)
+        return self.ingest_tabular_data(dataset_id=dataset_id, sources=[source], timeout=timeout)
 
     # ------------------------------------------------------------------ Schemas
 
